@@ -1,0 +1,171 @@
+---
+title: "Pset4 - Differential Gene Expression Analysis"
+output: pdf_document
+date: "2024-04-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(DESeq2)
+```
+
+## Load and Filter Data
+
+```{r load_data}
+# Read in the counts table
+Counts <- read.delim("counts.csv", header = TRUE, row.names = 1, sep = ",")
+print(paste("Initial genes:", nrow(Counts)))
+
+# Filter genes with total counts <= 50
+Counts <- Counts[which(rowSums(Counts) > 50), ]
+print(paste("Genes after filtering:", nrow(Counts)))
+
+# Display first few rows
+head(Counts)
+```
+
+## Set Up Experimental Design
+
+```{r setup_design}
+# Set up the conditions of the experiment
+# Adjust this based on your actual sample names
+sample_names <- colnames(Counts)
+print("Sample names:")
+print(sample_names)
+
+# Create condition factor - modify based on your actual design
+# Assuming first 3 are controls (C) and rest are samples (S)
+n_samples <- ncol(Counts)
+n_controls <- 3
+condition <- factor(c(rep("C", n_controls), rep("S", n_samples - n_controls)))
+
+# Create column data
+coldata <- data.frame(row.names = colnames(Counts), condition)
+print(coldata)
+```
+
+## DESeq2 Analysis
+
+```{r deseq_analysis}
+# Generate a DESeq object for analysis
+dds <- DESeqDataSetFromMatrix(countData = Counts, 
+                               colData = coldata, 
+                               design = ~condition)
+
+# Run DESeq2
+dds <- DESeq(dds)
+
+# Variance stabilizing transformation
+vsdata <- vst(dds, blind = FALSE)
+```
+
+## Quality Control Plots
+
+```{r qc_plots, fig.width=8, fig.height=6}
+# PCA plot to check sample clustering
+plotPCA(vsdata, intgroup = "condition")
+
+# Dispersion estimates plot
+plotDispEsts(dds)
+```
+
+## Differential Expression Results
+
+```{r get_results}
+# Get results comparing Samples vs Controls
+res <- results(dds, contrast = c("condition", "S", "C"))
+
+# Summary of results
+summary(res)
+
+# View results
+head(res[order(res$padj), ], 10)
+```
+
+## Filter for Significant Genes
+
+```{r filter_significant}
+# Remove NA values and filter by adjusted p-value < 0.05
+sigs <- na.omit(res)
+sigs <- sigs[sigs$padj < 0.05, ]
+
+print(paste("Number of significant genes (padj < 0.05):", nrow(sigs)))
+
+# Show top 20 significant genes
+head(sigs[order(sigs$padj), ], 20)
+
+# Count upregulated and downregulated genes
+up_genes <- sum(sigs$log2FoldChange > 0)
+down_genes <- sum(sigs$log2FoldChange < 0)
+
+print(paste("Upregulated genes:", up_genes))
+print(paste("Downregulated genes:", down_genes))
+```
+
+## Additional Stringent Filtering
+
+```{r stringent_filter}
+# Apply more stringent filters: padj < 0.05 AND |log2FC| > 1
+sigs_stringent <- sigs[abs(sigs$log2FoldChange) > 1, ]
+
+print(paste("Number of significant genes (padj < 0.05 & |log2FC| > 1):", 
+            nrow(sigs_stringent)))
+
+# Show top genes with largest fold changes
+head(sigs_stringent[order(abs(sigs_stringent$log2FoldChange), decreasing = TRUE), ], 20)
+```
+
+## Visualization of Results
+
+```{r ma_plot, fig.width=8, fig.height=6}
+# MA plot (log2FC vs mean expression)
+plotMA(res, ylim = c(-5, 5))
+```
+
+```{r volcano_plot, fig.width=8, fig.height=6}
+# Volcano plot
+with(res, plot(log2FoldChange, -log10(pvalue), 
+               pch = 20, 
+               main = "Volcano Plot",
+               xlab = "log2 Fold Change",
+               ylab = "-log10(p-value)",
+               col = "gray"))
+
+# Add colored points for significant genes
+with(subset(res, padj < 0.05 & log2FoldChange > 1), 
+     points(log2FoldChange, -log10(pvalue), pch = 20, col = "red"))
+with(subset(res, padj < 0.05 & log2FoldChange < -1), 
+     points(log2FoldChange, -log10(pvalue), pch = 20, col = "blue"))
+
+# Add legend
+legend("topright", 
+       legend = c("Upregulated", "Downregulated", "Not Significant"),
+       col = c("red", "blue", "gray"), 
+       pch = 20)
+
+# Add threshold lines
+abline(h = -log10(0.05), col = "green", lty = 2)
+abline(v = c(-1, 1), col = "green", lty = 2)
+```
+
+## Export Results
+
+```{r export_results}
+# Export all results to CSV
+write.csv(as.data.frame(res), file = "deseq2_all_results.csv")
+
+# Export significant genes only
+write.csv(as.data.frame(sigs), file = "deseq2_significant_genes.csv")
+
+# Export stringent filtered genes
+write.csv(as.data.frame(sigs_stringent), 
+          file = "deseq2_significant_genes_stringent.csv")
+
+print("Results exported to CSV files")
+```
+
+## Session Information
+
+```{r session_info}
+sessionInfo()
+```
